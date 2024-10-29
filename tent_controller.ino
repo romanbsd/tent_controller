@@ -1,3 +1,4 @@
+#include <LowPower.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
 #include <MHZ.h>
@@ -19,11 +20,13 @@ MHZ mhz(MHZRXPIN, MHZTXPIN, MHZ19C);
 #define FAN_RELAY_PIN 3
 #define HUMIDIFIER_RELAY_PIN 4
 
-// Timing variables for fan control
+// Timing variables
+unsigned long previousMillis = 0;
 unsigned long previousFanMillis = 0;       // Tracks last time the fan was turned on
 unsigned long fanStartMillis = 0;          // Tracks the time when fan is turned on
 const unsigned long fanInterval = 3600000; // 1 hour in milliseconds
 const unsigned long fanOnDuration = 60000; // 1 minute in milliseconds
+const unsigned long updateInterval = 2000; // 2-second interval for main loop logic
 
 // Humidity and temperature thresholds
 float desiredHumidity = 90.0; // Desired humidity percentage
@@ -54,87 +57,87 @@ void setup() {
 }
 
 void loop() {
-  // Read humidity and temperature from the sensor
-  float humidity = dht.readHumidity();
-  float temperature = dht.readTemperature();
+  unsigned long currentMillis = millis();
 
-  // Check if reading was successful
-  if (isnan(humidity) || isnan(temperature)) {
-    Serial.println("Failed to read from DHT sensor!");
-    humidity = desiredHumidity;
-    temperature = 0;
-  }
+  // Main loop tasks every 2 seconds
+  if (currentMillis - previousMillis >= updateInterval) {
+    previousMillis = currentMillis;
 
-  // Display the readings on the Serial Monitor
-  Serial.print("Humidity: ");
-  Serial.print(humidity);
-  Serial.print("%\t");
-  Serial.print("Temperature: ");
-  Serial.print(temperature);
-  Serial.println("C");
+    // Read humidity and temperature
+    float humidity = dht.readHumidity();
+    float temperature = dht.readTemperature();
 
-  // **Display temperature and humidity on the LCD**
-  lcd.clear();  // Clear the display before writing new data
-  lcd.setCursor(0, 0);  // Set the cursor to the first row
-  lcd.print("Temp: ");
-  lcd.print(temperature);
-  lcd.print("C");
-  
-  lcd.setCursor(0, 1);  // Set the cursor to the second row
-  lcd.print("Humidity: ");
-  lcd.print(humidity);
-  lcd.print("%");
+    // Check for valid readings
+    if (isnan(humidity) || isnan(temperature)) {
+      Serial.println("Failed to read from DHT sensor!");
+      humidity = desiredHumidity;
+      temperature = 0;
+    }
 
-  if (mhz.isReady()) {
-    int ppm = mhz.readCO2UART();
-    lcd.print(" PPM: ");
-    lcd.print(ppm);
-    
-    int temperature = mhz.getLastTemperature();
-    Serial.print(", Temperature: ");
+    // Display humidity and temperature on LCD and Serial
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Temp: ");
+    lcd.print(temperature);
+    lcd.print("C");
 
-    if (temperature > 0) {
-      Serial.println(temperature);
-    } else {
-      Serial.println("n/a");
+    lcd.setCursor(0, 1);
+    lcd.print("Humidity: ");
+    lcd.print(humidity);
+    lcd.print("%");
+
+    Serial.print("Humidity: ");
+    Serial.print(humidity);
+    Serial.print("%\t");
+    Serial.print("Temperature: ");
+    Serial.print(temperature);
+    Serial.println("C");
+
+    // Additional MHZ CO2 sensor reading
+    if (mhz.isReady()) {
+      int ppm = mhz.readCO2UART();
+      int temperature = mhz.getLastTemperature();
+
+      lcd.print(" PPM: ");
+      lcd.print(ppm);
+      Serial.print(", PPM: ");
+      Serial.print(ppm);
+
+      if (temperature > 0) {
+        Serial.print(", Temperature: ");
+        Serial.println(temperature);
+      } else {
+        Serial.println(", Temperature: n/a");
+      }
+    }
+
+    // Humidifier control based on desired humidity level
+    if (!isPumpOn && humidity <= (desiredHumidity - humidityThreshold)) {
+      digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH); // Turn on humidifier
+      isPumpOn = true;
+      Serial.println("Humidifier ON");
+    } else if (isPumpOn && humidity >= (desiredHumidity + humidityThreshold)) {
+      digitalWrite(HUMIDIFIER_RELAY_PIN, LOW); // Turn off humidifier
+      isPumpOn = false;
+      Serial.println("Humidifier OFF");
     }
   }
 
-  // Control the humidifier based on the desired humidity level
-  if (!isPumpOn && humidity < (desiredHumidity - humidityThreshold)) {
-    digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH); // Turn on the humidifier
-    Serial.println("Humidifier ON");
-  } else if (isPumpOn && humidity > (desiredHumidity + humidityThreshold)) {
-    digitalWrite(HUMIDIFIER_RELAY_PIN, LOW); // Turn off the humidifier
-    Serial.println("Humidifier OFF");
-  }
-
-  unsigned long currentMillis = millis();
-
-  // Check if it’s time to turn the fan on (every hour)
+  // Fan control: Turn on for 1 minute every hour
   if (!isFanOn && (currentMillis - previousFanMillis >= fanInterval)) {
-    // Turn on the fan
-    digitalWrite(FAN_RELAY_PIN, HIGH);
-    Serial.println("Fan ON");
-
-    // Record the time the fan was turned on and update the previous fan time
+    digitalWrite(FAN_RELAY_PIN, HIGH); // Turn on fan
+    isFanOn = true;
     fanStartMillis = currentMillis;
     previousFanMillis = currentMillis;
-
-    // Set the fan state to on
-    isFanOn = true;
+    Serial.println("Fan ON");
   }
 
-  // Check if it’s time to turn the fan off (after 1 minute of being on)
   if (isFanOn && (currentMillis - fanStartMillis >= fanOnDuration)) {
-    // Turn off the fan
-    digitalWrite(FAN_RELAY_PIN, LOW);
-    Serial.println("Fan OFF");
-
-    // Reset the fan state to off
+    digitalWrite(FAN_RELAY_PIN, LOW); // Turn off fan
     isFanOn = false;
+    Serial.println("Fan OFF");
   }
 
-  // Small delay to avoid flooding the display and serial monitor
-  delay(2000);  // Update every 2 seconds
+  // Enter idle mode until the next interrupt (saves power)
+  LowPower.idle(SLEEP_2S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_OFF);
 }
