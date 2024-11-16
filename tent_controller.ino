@@ -1,7 +1,6 @@
 #include <LowPower.h>
 #include <LiquidCrystal_I2C.h>
 #include <DHT.h>
-#include <MHZ.h>
 
 // Set the LCD address to 0x27 for a 16 chars and 2 line display
 LiquidCrystal_I2C lcd(0x27, 16, 2);
@@ -11,14 +10,9 @@ LiquidCrystal_I2C lcd(0x27, 16, 2);
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
-// Define MH-Z19C sensor settings
-#define MHZRXPIN 10
-#define MHZTXPIN 11
-MHZ mhz(MHZRXPIN, MHZTXPIN, MHZ19C);
-
 // Define pins for relay modules
-#define FAN_RELAY_PIN 3
-#define HUMIDIFIER_RELAY_PIN 4
+#define FAN_RELAY_PIN 0
+#define HUMIDIFIER_RELAY_PIN 1
 
 // Timing variables
 unsigned long previousMillis = 0;
@@ -86,30 +80,12 @@ void loop() {
     lcd.print(humidity);
     lcd.print("%");
 
-    Serial.print("Humidity: ");
+    Serial.print("\nHumidity: ");
     Serial.print(humidity);
     Serial.print("%\t");
     Serial.print("Temperature: ");
     Serial.print(temperature);
     Serial.println("C");
-
-    // Additional MHZ CO2 sensor reading
-    if (mhz.isReady()) {
-      int ppm = mhz.readCO2UART();
-      int temperature = mhz.getLastTemperature();
-
-      lcd.print(" PPM: ");
-      lcd.print(ppm);
-      Serial.print(", PPM: ");
-      Serial.print(ppm);
-
-      if (temperature > 0) {
-        Serial.print(", Temperature: ");
-        Serial.println(temperature);
-      } else {
-        Serial.println(", Temperature: n/a");
-      }
-    }
 
     // Humidifier control based on desired humidity level
     if (!isPumpOn && humidity <= (desiredHumidity - humidityThreshold)) {
@@ -139,5 +115,5 @@ void loop() {
   }
 
   // Enter idle mode until the next interrupt (saves power)
-  LowPower.idle(SLEEP_2S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_OFF, TWI_OFF);
+  LowPower.idle(SLEEP_2S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_ON, TWI_ON);
 }
