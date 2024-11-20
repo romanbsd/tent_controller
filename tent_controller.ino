@@ -15,6 +15,10 @@ DHT dht(DHTPIN, DHTTYPE);
 #define HEATER_RELAY_PIN 1
 #define HUMIDIFIER_RELAY_PIN 2
 
+#define BUTTON_PIN 3
+#define DEBOUNCE_DELAY 50
+
+
 // Timing variables
 unsigned long previousMillis = 0;
 unsigned long previousFanMillis = 0;        // Tracks last time the fan was turned on
@@ -36,25 +40,25 @@ bool isHeaterOn = false;
 
 // Define the custom characters
 byte fanIcon[8] = {
+  B00000,
   B00100,
   B10101,
   B01110,
   B10101,
   B00100,
   B00000,
-  B00000,
   B00000
 };
 
 byte fireIcon[8] = {
+  B00000,
   B00100,
   B01010,
   B00101,
   B01010,
   B10100,
   B01000,
-  B11100,
-  B00000
+  B11100
 };
 
 byte waterDropIcon[8] = {
@@ -88,6 +92,8 @@ void setup() {
   pinMode(HEATER_RELAY_PIN, OUTPUT);
   pinMode(HUMIDIFIER_RELAY_PIN, OUTPUT);
 
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
   // Turn off the relays initially
   digitalWrite(FAN_RELAY_PIN, LOW);
   digitalWrite(HEATER_RELAY_PIN, LOW);
@@ -96,7 +102,7 @@ void setup() {
 
 void toggleFan(bool on) {
   digitalWrite(FAN_RELAY_PIN, on ? HIGH : LOW);  // Turn on fan
-  isFanOn = true;
+  isFanOn = on;
   Serial.print("Fan ");
   Serial.println(on ? "ON" : "OFF");
 }
@@ -110,7 +116,7 @@ void togglePump(bool on) {
 
 void toggleHeater(bool on) {
   digitalWrite(HEATER_RELAY_PIN, on ? HIGH : LOW);  // Turn on heater
-  isHeaterOn = true;
+  isHeaterOn = on;
   Serial.print("Heater ");
   Serial.println(on ? "ON" : "OFF");
 }
@@ -118,30 +124,53 @@ void toggleHeater(bool on) {
 void updateDisplay(float temperature, float humidity) {
   // Display humidity and temperature on LCD and Serial
   lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Temp: ");
+  lcd.setCursor(1, 0);
   lcd.print(temperature);
-  lcd.print("C, Humidity: ");
+  lcd.print("C, ");
   lcd.print(humidity);
   lcd.print("%");
 
-  Serial.print("\nHumidity: ");
+  Serial.print("Humidity: ");
   Serial.print(humidity);
-  Serial.print("%\t");
-  Serial.print("Temperature: ");
+  Serial.print("%\tTemperature: ");
   Serial.print(temperature);
   Serial.println("C");
 
-  lcd.setCursor(1, 1);
-  isFanOn ? lcd.write((byte)0) : lcd.print(' ');
   lcd.setCursor(3, 1);
+  isFanOn ? lcd.write((byte)0) : lcd.print(' ');
+  lcd.setCursor(7, 1);
   isHeaterOn ? lcd.write((byte)1) : lcd.print(' ');
-  lcd.setCursor(5, 1);
+  lcd.setCursor(11, 1);
   isPumpOn ? lcd.write((byte)2) : lcd.print(' ');
+}
+
+void handleButton() {
+  static uint8_t lastSteadyState = HIGH, lastFlickerableState = HIGH;
+  static unsigned long lastDebounceTime = 0;
+
+  int currentState = digitalRead(BUTTON_PIN);
+
+  // Debounce logic: Update flickerable state and debounce timer
+  if (currentState != lastFlickerableState) {
+    lastDebounceTime = millis();
+    lastFlickerableState = currentState;
+  }
+
+  // Check for a stable button state
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
+    if (lastSteadyState == HIGH && currentState == LOW) {
+      Serial.println("Button pressed");
+      toggleFan(!isFanOn);
+      fanStartMillis = millis();
+    }
+    lastSteadyState = currentState;  // Update steady state
+  }
 }
 
 void loop() {
   unsigned long currentMillis = millis();
+
+  handleButton();
 
   // Main loop tasks every 2 seconds
   if (currentMillis - previousMillis >= updateInterval) {
