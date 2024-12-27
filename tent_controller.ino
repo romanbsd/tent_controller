@@ -30,7 +30,7 @@ const unsigned long updateInterval = 2000;  // 2-second interval for main loop l
 // Humidity and temperature thresholds
 const float desiredHumidity = 90.f;     // Desired humidity percentage
 const float humidityThreshold = 4.f;    // Tolerance range for humidity
-const float desiredTemperature = 23.f;  // 22-24
+const float desiredTemperature = 23.f;  // 21-25
 const float temperatureThreshold = 2.f;
 
 bool isFanOn = false;
@@ -136,12 +136,18 @@ void updateDisplay(float temperature, float humidity) {
   Serial.print(temperature);
   Serial.println("C");
 
-  lcd.setCursor(3, 1);
-  isFanOn ? lcd.write((byte)0) : lcd.print(' ');
-  lcd.setCursor(7, 1);
-  isHeaterOn ? lcd.write((byte)1) : lcd.print(' ');
-  lcd.setCursor(11, 1);
-  isPumpOn ? lcd.write((byte)2) : lcd.print(' ');
+  if (isFanOn) {
+    lcd.setCursor(3, 1);
+    lcd.write((byte)0);
+  }
+  if (isHeaterOn) {
+    lcd.setCursor(7, 1);
+    lcd.write((byte)1);
+  }
+  if (isPumpOn) {
+    lcd.setCursor(11, 1);
+    lcd.write((byte)2);
+  }
 }
 
 void handleButton() {
@@ -204,7 +210,7 @@ void loop() {
   }
 
   // Fan control: Turn on for 1 minute every hour
-  if (!isFanOn && (currentMillis - previousFanMillis >= fanInterval)) {
+  if (!isPumpOn && !isFanOn && (currentMillis - previousFanMillis >= fanInterval)) {
     toggleFan(true);
     fanStartMillis = currentMillis;
     previousFanMillis = currentMillis;
