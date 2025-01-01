@@ -1,21 +1,21 @@
 #include <LowPower.h>
 #include <LiquidCrystal_I2C.h>
-#include <DHT.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BME280.h>
 
 // Set the LCD address to 0x27 for a 16 chars and 2 line display
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-// Define DHT sensor settings
-#define DHTPIN 2  // Pin where the DHT sensor is connected
-#define DHTTYPE DHT22
-DHT dht(DHTPIN, DHTTYPE);
+// Define BME280 sensor settings
+#define BME280_I2C_ADDR 0x76  // Default I2C address for BME280
+Adafruit_BME280 bme;
 
 // Define pins for relay modules
-#define FAN_RELAY_PIN 0
-#define HEATER_RELAY_PIN 1
-#define HUMIDIFIER_RELAY_PIN 2
+#define FAN_RELAY_PIN 2
+#define HEATER_RELAY_PIN 3
+#define HUMIDIFIER_RELAY_PIN 4
 
-#define BUTTON_PIN 3
+#define BUTTON_PIN A3
 #define DEBOUNCE_DELAY 50
 
 
@@ -74,9 +74,12 @@ byte waterDropIcon[8] = {
 
 void setup() {
   Serial.begin(9600);
+  Serial.println("Serial started");
 
-  // Initialize the DHT sensor
-  dht.begin();
+  // Initialize the BME280 sensor
+  if (!bme.begin(BME280_I2C_ADDR)) {
+    Serial.println("Could not find a valid BME280 sensor, check wiring!");
+  }
 
   // Initialize the LCD
   lcd.init();
@@ -183,12 +186,12 @@ void loop() {
     previousMillis = currentMillis;
 
     // Read humidity and temperature
-    float humidity = dht.readHumidity();
-    float temperature = dht.readTemperature();
+    float humidity = bme.readHumidity();
+    float temperature = bme.readTemperature();
 
     // Check for valid readings
     if (isnan(humidity) || isnan(temperature)) {
-      Serial.println("Failed to read from DHT sensor!");
+      Serial.println("Failed to read from BME280 sensor!");
       humidity = desiredHumidity;
       temperature = desiredTemperature;
     }
