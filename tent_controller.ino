@@ -1,4 +1,3 @@
-#include <LowPower.h>
 #include <LiquidCrystal_I2C.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
@@ -176,13 +175,18 @@ void handleButton() {
   }
 }
 
+unsigned long getElapsedTime(unsigned long startTime) {
+  unsigned long currentTime = millis();
+  return (currentTime >= startTime) ? currentTime - startTime : (0xFFFFFFFF - startTime) + currentTime;
+}
+
 void loop() {
   unsigned long currentMillis = millis();
 
   handleButton();
 
   // Main loop tasks every 2 seconds
-  if (currentMillis - previousMillis >= updateInterval) {
+  if (getElapsedTime(previousMillis) >= updateInterval) {
     previousMillis = currentMillis;
 
     // Read humidity and temperature
@@ -222,7 +226,4 @@ void loop() {
   if (isFanOn && (currentMillis - fanStartMillis >= fanOnDuration)) {
     toggleFan(false);
   }
-
-  // Enter idle mode until the next interrupt (saves power)
-  LowPower.idle(SLEEP_2S, ADC_OFF, TIMER2_OFF, TIMER1_OFF, TIMER0_ON, SPI_OFF, USART0_ON, TWI_ON);
 }
