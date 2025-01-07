@@ -236,7 +236,7 @@ void loop() {
     // Humidifier control based on desired humidity level
     if (!isPumpOn && humidity <= (desiredHumidity - humidityThreshold)) {
       togglePump(true);
-    } else if (isPumpOn && humidity >= (desiredHumidity + humidityThreshold)) {
+    } else if (isPumpOn && humidity >= desiredHumidity) {
       togglePump(false);
     }
     // Heater control based on desired temperature
