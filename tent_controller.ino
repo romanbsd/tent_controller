@@ -1,13 +1,30 @@
+#define USE_BME
+
+#include <avr/wdt.h>
 #include <LiquidCrystal_I2C.h>
+#ifdef USE_DHT
+#include <DHT.h>
+#endif
+#ifdef USE_BME
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#endif
 
 // Set the LCD address to 0x27 for a 16 chars and 2 line display
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
+#ifdef USE_DHT
+// Define DHT sensor settings
+#define DHTPIN 2  // Pin where the DHT sensor is connected
+#define DHTTYPE DHT22
+DHT sensor(DHTPIN, DHTTYPE);
+#endif
+
+#ifdef USE_BME
 // Define BME280 sensor settings
 #define BME280_I2C_ADDR 0x76  // Default I2C address for BME280
-Adafruit_BME280 bme;
+Adafruit_BME280 sensor;
+#endif
 
 // Define pins for relay modules
 #define FAN_RELAY_PIN 2
@@ -72,13 +89,22 @@ byte waterDropIcon[8] = {
 };
 
 void setup() {
+  wdt_disable();
+
   Serial.begin(9600);
   Serial.println("Serial started");
 
+#ifdef USE_DHT
+  // Initialize the DHT sensor
+  sensor.begin();
+#endif
+
+#ifdef USE_BME
   // Initialize the BME280 sensor
-  if (!bme.begin(BME280_I2C_ADDR)) {
+  if (!sensor.begin(BME280_I2C_ADDR)) {
     Serial.println("Could not find a valid BME280 sensor, check wiring!");
   }
+#endif
 
   // Initialize the LCD
   lcd.init();
@@ -100,6 +126,7 @@ void setup() {
   digitalWrite(FAN_RELAY_PIN, LOW);
   digitalWrite(HEATER_RELAY_PIN, LOW);
   digitalWrite(HUMIDIFIER_RELAY_PIN, LOW);
+  wdt_enable(WDTO_8S);
 }
 
 void toggleFan(bool on) {
@@ -181,6 +208,7 @@ unsigned long getElapsedTime(unsigned long startTime) {
 }
 
 void loop() {
+  wdt_reset();
   unsigned long currentMillis = millis();
 
   handleButton();
@@ -190,17 +218,20 @@ void loop() {
     previousMillis = currentMillis;
 
     // Read humidity and temperature
-    float humidity = bme.readHumidity();
-    float temperature = bme.readTemperature();
+    float humidity = sensor.readHumidity();
+    float temperature = sensor.readTemperature();
 
     // Check for valid readings
-    if (isnan(humidity) || isnan(temperature)) {
-      Serial.println("Failed to read from BME280 sensor!");
+    if (isnan(humidity) || isnan(temperature) || humidity == 0 || temperature == 0) {
+      Serial.println("Failed to read from sensor!");
       humidity = desiredHumidity;
       temperature = desiredTemperature;
+      lcd.clear();
+      lcd.setCursor(1, 0);
+      lcd.print("Sensor read failed");
+    } else {
+      updateDisplay(temperature, humidity);
     }
-
-    updateDisplay(temperature, humidity);
 
     // Humidifier control based on desired humidity level
     if (!isPumpOn && humidity <= (desiredHumidity - humidityThreshold)) {
