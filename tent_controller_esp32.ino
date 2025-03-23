@@ -7,6 +7,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Preferences.h>
+#include <ArduinoJson.h>
 #ifdef USE_SCD30
 #include <SensirionI2cScd30.h>
 SensirionI2cScd30 scd30;
@@ -392,6 +393,53 @@ void loop() {
   }
 }
 
+// MQTT message handler
+void messageHandler(String &topic, String &payload) {
+  Serial.println("Incoming: " + topic + " - " + payload);
+
+  // Only handle shared attributes updates
+  if (topic == "v1/devices/me/attributes") {
+    // Parse JSON payload
+    JsonDocument doc;
+    DeserializationError error = deserializeJson(doc, payload);
+
+    if (error) {
+      Serial.print("deserializeJson() failed: ");
+      Serial.println(error.c_str());
+      return;
+    }
+
+    bool settingsChanged = false;
+
+    // Update settings if present in the payload
+    if (doc["desiredHumidity"].is<float>()) {
+      desiredHumidity = doc["desiredHumidity"].as<float>();
+      settingsChanged = true;
+    }
+    if (doc["humidityThreshold"].is<float>()) {
+      humidityThreshold = doc["humidityThreshold"].as<float>();
+      settingsChanged = true;
+    }
+    if (doc["desiredTemperature"].is<float>()) {
+      desiredTemperature = doc["desiredTemperature"].as<float>();
+      settingsChanged = true;
+    }
+    if (doc["temperatureThreshold"].is<float>()) {
+      temperatureThreshold = doc["temperatureThreshold"].as<float>();
+      settingsChanged = true;
+    }
+    if (doc["fanOnDuration"].is<unsigned long>()) {
+      fanOnDuration = doc["fanOnDuration"].as<unsigned long>();
+      settingsChanged = true;
+    }
+
+    // If any setting was changed, save to NVS
+    if (settingsChanged) {
+      saveSettings();
+    }
+  }
+}
+
 void connect() {
   uint8_t retryCount = 0;
 
@@ -412,12 +460,16 @@ void connect() {
       Serial.println("\nConnected to Wi-Fi");
     } else {
       Serial.println("\nFailed to connect to Wi-Fi");
-      return;  // Exit if Wi-Fi connection fails
+      return;
     }
   }
 
   Serial.print("\nConnecting to MQTT broker");
   client.begin(broker, port, net);
+
+  // Set up message handler
+  client.onMessage(messageHandler);
+
   retryCount = 0;
   while (!client.connected() && retryCount < MAX_RETRIES) {
     client.connect("ESP32Client", token, (const char *)nullptr);
@@ -429,6 +481,10 @@ void connect() {
 
   if (client.connected()) {
     Serial.println("\nConnected to MQTT broker");
+    // Subscribe to shared attributes topic
+    client.subscribe("v1/devices/me/attributes");
+    // Publish current settings after connection
+    publishSettings();
   } else {
     Serial.println("\nFailed to connect to MQTT broker, retrying later...");
   }
