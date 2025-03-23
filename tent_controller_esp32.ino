@@ -4,41 +4,31 @@
 #include <MQTT.h>
 #include <esp_task_wdt.h>
 #include <LiquidCrystal_I2C.h>
-#include <Adafruit_SCD30.h>
+#ifdef USE_SCD30
+#include <SensirionI2cScd30.h>
+SensirionI2cScd30 scd30;
+#endif
 #ifdef USE_DHT
 #include <DHT.h>
+// Define DHT sensor settings
+#define DHTPIN 2  // Pin where the DHT sensor is connected
+#define DHTTYPE DHT22
+DHT sensor(DHTPIN, DHTTYPE);
 #endif
 #ifdef USE_BME
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+// Define BME280 sensor settings
+#define BME280_I2C_ADDR 0x76  // Default I2C address for BME280
+Adafruit_BME280 sensor;
 #endif
 #ifdef USE_SHT
-#include <Wire.h>
 #include <SensirionI2cSht4x.h>
 SensirionI2cSht4x sht45;
 #endif
 
 // Set the LCD address to 0x27 for a 16 chars and 2 line display
 LiquidCrystal_I2C lcd(0x27, 16, 2);
-
-#ifdef USE_DHT
-// Define DHT sensor settings
-#define DHTPIN 2  // Pin where the DHT sensor is connected
-#define DHTTYPE DHT22
-DHT sensor(DHTPIN, DHTTYPE);
-#endif
-
-#ifdef USE_BME
-// Define BME280 sensor settings
-#define BME280_I2C_ADDR 0x76  // Default I2C address for BME280
-Adafruit_BME280 sensor;
-#endif
-
-#ifdef USE_SHT
-SensirionI2cSht4x sht45;
-#endif
-
-Adafruit_SCD30 scd30;
 
 // Define pins for relay modules
 #define HEATER_RELAY_PIN 23
@@ -111,6 +101,23 @@ byte waterDropIcon[8] = {
   0b00000
 };
 
+#ifdef USE_SCD30
+void initScd30 {
+  Wire.begin();
+  scd30.begin(Wire, SCD30_I2C_ADDR_61);
+  scd30.stopPeriodicMeasurement();
+  scd30.softReset();
+  int16_t error = sensor.startPeriodicMeasurement(0);
+  if (error != NO_ERROR) {
+    char errorMessage[128];
+    Serial.print("Error trying to execute startPeriodicMeasurement(): ");
+    errorToString(error, errorMessage, sizeof(errorMessage));
+    Serial.println(errorMessage);
+  }
+}
+#endif
+
+
 void setup() {
   Serial.begin(9600);
   Serial.println("Serial started");
@@ -133,7 +140,9 @@ void setup() {
   sht45.softReset();
 #endif
 
-  scd30.begin();
+#ifdef USE_SCD30
+  initScd30();
+#endif
 
   // Initialize the LCD
   lcd.init();
@@ -302,26 +311,30 @@ void loop() {
       toggleHeater(false);
     }
 
-    float ppm = -1;
-    if (scd30.dataReady()){
-      if (scd30.read()) {
-        Serial.print("SCD30 Temperature: ");
-        Serial.print(scd30.temperature);
-        Serial.println(" degrees C");
+    float ppm = 0;
+#ifdef USE_SCD30
+    float scd30_temperature = 0;
+    float scd30_humidity = 0;
+    int16_t error = scd30.blockingReadMeasurementData(ppm, scd30_temperature, scd30_humidity);
+    if (error == 0) {
+      Serial.print("SCD30 Temperature: ");
+      Serial.print(scd30_temperature);
+      Serial.println(" degrees C");
 
-        Serial.print("SCD30 Relative Humidity: ");
-        Serial.print(scd30.relative_humidity);
-        Serial.println(" %");
+      Serial.print("SCD30 Relative Humidity: ");
+      Serial.print(scd30_humidity);
+      Serial.println(" %");
 
-        ppm = scd30.CO2;
-        Serial.print("CO2: ");
-        Serial.print(ppm, 3);
-        Serial.println(" ppm");
-        Serial.println("");
-      } else {
-        Serial.println("Error reading sensor data");
-      }
+      ppm = scd30.CO2;
+      Serial.print("CO2: ");
+      Serial.print(ppm, 3);
+      Serial.println(" ppm");
+      Serial.println("");
+    } else {
+      Serial.println("Error reading sensor data");
     }
+#endif
+
     sendData(temperature, humidity, ppm);
   }
 
