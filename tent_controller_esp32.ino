@@ -1,4 +1,4 @@
-#define USE_BME
+#define USE_SHT
 
 #include <WiFi.h>
 #include <MQTT.h>
@@ -11,6 +11,11 @@
 #ifdef USE_BME
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
+#endif
+#ifdef USE_SHT
+#include <Wire.h>
+#include <SensirionI2cSht4x.h>
+SensirionI2cSht4x sht45;
 #endif
 
 // Set the LCD address to 0x27 for a 16 chars and 2 line display
@@ -29,16 +34,29 @@ DHT sensor(DHTPIN, DHTTYPE);
 Adafruit_BME280 sensor;
 #endif
 
+#ifdef USE_SHT
+SensirionI2cSht4x sht45;
+#endif
+
 Adafruit_SCD30 scd30;
 
 // Define pins for relay modules
-#define FAN_RELAY_PIN 2
-#define HEATER_RELAY_PIN 3
-#define HUMIDIFIER_RELAY_PIN 4
+#define HEATER_RELAY_PIN 23
+#define FAN_RELAY_PIN 25
+#define HUMIDIFIER_RELAY_PIN 26
 
 #define BUTTON_PIN A3
 #define DEBOUNCE_DELAY 50
 
+const uint8_t MAX_RETRIES = 10;
+const char ssid[] = "eternity";
+const char pass[] = "OpenSesame3";
+const char token[] = "t0x1394lpdoaye1h6ac1";
+const char broker[] = "dash.gugl.org";
+const int port = 1883;
+
+WiFiClient net;
+MQTTClient client;
 
 // Timing variables
 unsigned long previousMillis = 0;
@@ -61,36 +79,36 @@ bool isHeaterOn = false;
 
 // Define the custom characters
 byte fanIcon[8] = {
-  B00000,
-  B00100,
-  B10101,
-  B01110,
-  B10101,
-  B00100,
-  B00000,
-  B00000
+  0b00000,
+  0b00100,
+  0b10101,
+  0b01110,
+  0b10101,
+  0b00100,
+  0b00000,
+  0b00000
 };
 
 byte fireIcon[8] = {
-  B00000,
-  B00100,
-  B01010,
-  B00101,
-  B01010,
-  B10100,
-  B01000,
-  B11100
+  0b00000,
+  0b00100,
+  0b01010,
+  0b00101,
+  0b01010,
+  0b10100,
+  0b01000,
+  0b11100
 };
 
 byte waterDropIcon[8] = {
-  B00100,
-  B00100,
-  B01110,
-  B01110,
-  B11111,
-  B11111,
-  B01110,
-  B00000
+  0b00100,
+  0b00100,
+  0b01110,
+  0b01110,
+  0b11111,
+  0b11111,
+  0b01110,
+  0b00000
 };
 
 void setup() {
@@ -107,6 +125,12 @@ void setup() {
   if (!sensor.begin(BME280_I2C_ADDR)) {
     Serial.println("Could not find a valid BME280 sensor, check wiring!");
   }
+#endif
+
+#ifdef USE_SHT
+  Wire.begin();
+  sht45.begin(Wire, SHT45_I2C_ADDR_44);
+  sht45.softReset();
 #endif
 
   scd30.begin();
@@ -226,6 +250,12 @@ unsigned long getElapsedTime(unsigned long startTime) {
 }
 
 void loop() {
+  if (!client.connected()) {
+    connect();
+  }
+
+  client.loop();
+
   unsigned long currentMillis = millis();
 
   handleButton();
@@ -235,8 +265,17 @@ void loop() {
     previousMillis = currentMillis;
 
     // Read humidity and temperature
-    float humidity = sensor.readHumidity();
-    float temperature = sensor.readTemperature();
+    float humidity;
+    float temperature;
+
+#ifdef USE_BME
+    humidity = sensor.readHumidity();
+    temperature = sensor.readTemperature();
+#endif
+
+#ifdef USE_SHT
+    sht45.measureMediumPrecision(temperature, humidity);
+#endif
 
     // Check for valid readings
     if (isnan(humidity) || isnan(temperature) || humidity == 0 || temperature == 0) {
@@ -263,27 +302,27 @@ void loop() {
       toggleHeater(false);
     }
 
-    if (scd30.dataReady()){      
-      if (!scd30.read()) { 
-        Serial.println("Error reading sensor data"); return; 
+    float ppm = -1;
+    if (scd30.dataReady()){
+      if (scd30.read()) {
+        Serial.print("SCD30 Temperature: ");
+        Serial.print(scd30.temperature);
+        Serial.println(" degrees C");
+
+        Serial.print("SCD30 Relative Humidity: ");
+        Serial.print(scd30.relative_humidity);
+        Serial.println(" %");
+
+        ppm = scd30.CO2;
+        Serial.print("CO2: ");
+        Serial.print(ppm, 3);
+        Serial.println(" ppm");
+        Serial.println("");
+      } else {
+        Serial.println("Error reading sensor data");
       }
-
-      Serial.print("Temperature: ");
-      Serial.print(scd30.temperature);
-      Serial.println(" degrees C");
-      
-      Serial.print("Relative Humidity: ");
-      Serial.print(scd30.relative_humidity);
-      Serial.println(" %");
-      
-      Serial.print("CO2: ");
-      Serial.print(scd30.CO2, 3);
-      Serial.println(" ppm");
-      Serial.println("");
-    } else {
-      //Serial.println("No data");
     }
-
+    sendData(temperature, humidity, ppm);
   }
 
   // Fan control: Turn on for 1 minute every hour
