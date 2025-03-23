@@ -191,11 +191,28 @@ void setup() {
   }
 }
 
+// Helper method to publish telemetry data
+void publishTelemetry(const char* payload) {
+  if (client.connected()) {
+    Serial.print("Sending payload: ");
+    Serial.println(payload);
+    client.publish("v1/devices/me/telemetry", payload, true, 1);
+  }
+}
+
+// Helper method to publish device state
+void publishDeviceState(const char* device, bool state) {
+  char payload[32];
+  snprintf(payload, sizeof(payload), "{\"%s_on\":%d}", device, state ? 1 : 0);
+  publishTelemetry(payload);
+}
+
 void toggleFan(bool on) {
   digitalWrite(FAN_RELAY_PIN, on ? HIGH : LOW);  // Turn on fan
   isFanOn = on;
   Serial.print("Fan ");
   Serial.println(on ? "ON" : "OFF");
+  publishDeviceState("fan", on);
 }
 
 void togglePump(bool on) {
@@ -203,6 +220,7 @@ void togglePump(bool on) {
   isPumpOn = on;
   Serial.print("Humidifier ");
   Serial.println(on ? "ON" : "OFF");
+  publishDeviceState("humidifier", on);
 }
 
 void toggleHeater(bool on) {
@@ -210,6 +228,7 @@ void toggleHeater(bool on) {
   isHeaterOn = on;
   Serial.print("Heater ");
   Serial.println(on ? "ON" : "OFF");
+  publishDeviceState("heater", on);
 }
 
 void updateDisplay(float temperature, float humidity) {
@@ -404,9 +423,6 @@ void connect() {
 void sendData(float temperature, float humidity, int ppm) {
   char payload[64];
   snprintf(payload, sizeof(payload), "{\"temperature\":%.1f,\"humidity\":%.1f,\"co2\":%d}", temperature, humidity, ppm);
-  // Publish the data
-  Serial.print("Sending payload: ");
-  Serial.println(payload);
-  client.publish("v1/devices/me/telemetry", payload, true, 1);
+  publishTelemetry(payload);
 }
 
