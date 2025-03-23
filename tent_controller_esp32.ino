@@ -3,7 +3,9 @@
 #include <WiFi.h>
 #include <MQTT.h>
 #include <esp_task_wdt.h>
-#include <LiquidCrystal_I2C.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
 #ifdef USE_SCD30
 #include <SensirionI2cScd30.h>
 SensirionI2cScd30 scd30;
@@ -27,8 +29,12 @@ Adafruit_BME280 sensor;
 SensirionI2cSht4x sht45;
 #endif
 
-// Set the LCD address to 0x27 for a 16 chars and 2 line display
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+// OLED display settings
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1  // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // Define pins for relay modules
 #define HEATER_RELAY_PIN 23
@@ -66,39 +72,26 @@ bool isFanOn = false;
 bool isPumpOn = false;
 bool isHeaterOn = false;
 
-
-// Define the custom characters
-byte fanIcon[8] = {
-  0b00000,
-  0b00100,
-  0b10101,
-  0b01110,
-  0b10101,
-  0b00100,
-  0b00000,
-  0b00000
+// Define larger icons (16x16 pixels)
+const unsigned char PROGMEM windIcon[] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xC0,
+    0x0F, 0xF0, 0x1F, 0xF8, 0x3F, 0xFC, 0x3F, 0xFC,
+    0x3F, 0xFC, 0x3F, 0xFC, 0x1F, 0xF8, 0x0F, 0xF0,
+    0x03, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-byte fireIcon[8] = {
-  0b00000,
-  0b00100,
-  0b01010,
-  0b00101,
-  0b01010,
-  0b10100,
-  0b01000,
-  0b11100
+const unsigned char PROGMEM heatIcon[] = {
+    0x01, 0x80, 0x03, 0xC0, 0x07, 0xE0, 0x0F, 0xF0,
+    0x0F, 0xF0, 0x0F, 0xF0, 0x0F, 0xF0, 0x07, 0xE0,
+    0x07, 0xE0, 0x0F, 0xF0, 0x1F, 0xF8, 0x3F, 0xFC,
+    0x3F, 0xFC, 0x1F, 0xF8, 0x0F, 0xF0, 0x07, 0xE0
 };
 
-byte waterDropIcon[8] = {
-  0b00100,
-  0b00100,
-  0b01110,
-  0b01110,
-  0b11111,
-  0b11111,
-  0b01110,
-  0b00000
+const unsigned char PROGMEM waterIcon[] = {
+    0x01, 0x80, 0x03, 0xC0, 0x07, 0xE0, 0x0F, 0xF0,
+    0x1F, 0xF8, 0x3F, 0xFC, 0x3F, 0xFC, 0x7F, 0xFE,
+    0x7F, 0xFE, 0x7F, 0xFE, 0x7F, 0xFE, 0x3F, 0xFC,
+    0x3F, 0xFC, 0x1F, 0xF8, 0x0F, 0xF0, 0x07, 0xE0
 };
 
 #ifdef USE_SCD30
@@ -117,6 +110,30 @@ void initScd30 {
 }
 #endif
 
+// Function to initialize the OLED display
+void initDisplay() {
+  // Initialize OLED display
+  if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+    Serial.println(F("SSD1306 allocation failed"));
+    return;
+  }
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.display();
+}
+
+// Function to draw status icons
+void drawStatusIcons() {
+  if (isFanOn) {
+    display.drawBitmap(0, 48, windIcon, 16, 16, SSD1306_WHITE);
+  }
+  if (isHeaterOn) {
+    display.drawBitmap(56, 48, heatIcon, 16, 16, SSD1306_WHITE);
+  }
+  if (isPumpOn) {
+    display.drawBitmap(112, 48, waterIcon, 16, 16, SSD1306_WHITE);
+  }
+}
 
 void setup() {
   Serial.begin(9600);
@@ -144,14 +161,8 @@ void setup() {
   initScd30();
 #endif
 
-  // Initialize the LCD
-  lcd.init();
-  lcd.backlight();  // Turn on the LCD backlight
-
-  // Create the custom characters
-  lcd.createChar(0, fanIcon);
-  lcd.createChar(1, fireIcon);
-  lcd.createChar(2, waterDropIcon);
+  // Initialize the OLED display
+  initDisplay();
 
   // Set relay pins as output
   pinMode(FAN_RELAY_PIN, OUTPUT);
@@ -164,7 +175,7 @@ void setup() {
   digitalWrite(FAN_RELAY_PIN, LOW);
   digitalWrite(HEATER_RELAY_PIN, LOW);
   digitalWrite(HUMIDIFIER_RELAY_PIN, LOW);
-  
+
   // Configure the Task Watchdog Timer (TWDT)
   esp_task_wdt_config_t wdtConfig = {
     .timeout_ms = 5000,            // Set the timeout to 5000 ms (5 seconds)
@@ -202,32 +213,30 @@ void toggleHeater(bool on) {
 }
 
 void updateDisplay(float temperature, float humidity) {
-  // Display humidity and temperature on LCD and Serial
-  lcd.clear();
-  lcd.setCursor(1, 0);
-  lcd.print(temperature);
-  lcd.print("C, ");
-  lcd.print(humidity);
-  lcd.print("%");
+  display.clearDisplay();
 
+  // Display temperature
+  display.setTextSize(2);
+  display.setCursor(0, 0);
+  display.print(temperature, 1);
+  display.print("C");
+
+  // Display humidity
+  display.setCursor(0, 20);
+  display.print(humidity, 1);
+  display.print("%");
+
+  // Draw status icons at the bottom
+  drawStatusIcons();
+
+  display.display();
+
+  // Also print to Serial for debugging
   Serial.print("Humidity: ");
   Serial.print(humidity);
   Serial.print("%\tTemperature: ");
   Serial.print(temperature);
   Serial.println("C");
-
-  if (isFanOn) {
-    lcd.setCursor(3, 1);
-    lcd.write((byte)0);
-  }
-  if (isHeaterOn) {
-    lcd.setCursor(7, 1);
-    lcd.write((byte)1);
-  }
-  if (isPumpOn) {
-    lcd.setCursor(11, 1);
-    lcd.write((byte)2);
-  }
 }
 
 void handleButton() {
@@ -291,9 +300,9 @@ void loop() {
       Serial.println("Failed to read from sensor!");
       humidity = desiredHumidity;
       temperature = desiredTemperature;
-      lcd.clear();
-      lcd.setCursor(1, 0);
-      lcd.print("Sensor read failed");
+      display.clearDisplay();
+      display.setCursor(0, 0);
+      display.print("Sensor read failed");
     } else {
       updateDisplay(temperature, humidity);
     }
