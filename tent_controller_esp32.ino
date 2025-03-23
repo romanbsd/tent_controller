@@ -6,6 +6,7 @@
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Preferences.h>
 #ifdef USE_SCD30
 #include <SensirionI2cScd30.h>
 SensirionI2cScd30 scd30;
@@ -59,14 +60,24 @@ unsigned long previousMillis = 0;
 unsigned long previousFanMillis = 0;        // Tracks last time the fan was turned on
 unsigned long fanStartMillis = 0;           // Tracks the time when fan is turned on
 const unsigned long fanInterval = 3600000;  // 1 hour in milliseconds
-const unsigned long fanOnDuration = 60000;  // 1 minute in milliseconds
 const unsigned long updateInterval = 2000;  // 2-second interval for main loop logic
 
-// Humidity and temperature thresholds
-const float desiredHumidity = 90.f;     // Desired humidity percentage
-const float humidityThreshold = 4.f;    // Tolerance range for humidity
-const float desiredTemperature = 23.f;  // 21-25
-const float temperatureThreshold = 2.f;
+// Create preferences object
+Preferences preferences;
+
+// Default values for settings
+const float DEFAULT_DESIRED_HUMIDITY = 90.0f;
+const float DEFAULT_HUMIDITY_THRESHOLD = 4.0f;
+const float DEFAULT_DESIRED_TEMPERATURE = 23.0f;
+const float DEFAULT_TEMPERATURE_THRESHOLD = 2.0f;
+const unsigned long DEFAULT_FAN_DURATION = 60000;  // 1 minute in milliseconds
+
+// Settings variables
+float desiredHumidity;     // Desired humidity percentage
+float humidityThreshold;   // Tolerance range for humidity
+float desiredTemperature;  // Target temperature
+float temperatureThreshold;
+unsigned long fanOnDuration;
 
 bool isFanOn = false;
 bool isPumpOn = false;
@@ -138,6 +149,9 @@ void drawStatusIcons() {
 void setup() {
   Serial.begin(9600);
   Serial.println("Serial started");
+
+  // Load settings from NVS
+  loadSettings();
 
 #ifdef USE_DHT
   // Initialize the DHT sensor
@@ -424,5 +438,53 @@ void sendData(float temperature, float humidity, int ppm) {
   char payload[64];
   snprintf(payload, sizeof(payload), "{\"temperature\":%.1f,\"humidity\":%.1f,\"co2\":%d}", temperature, humidity, ppm);
   publishTelemetry(payload);
+}
+
+// Helper method to publish settings as attributes
+void publishSettings() {
+  char payload[128];
+  snprintf(payload, sizeof(payload),
+           "{\"desiredHumidity\":%.1f,\"humidityThreshold\":%.1f,"
+           "\"desiredTemperature\":%.1f,\"temperatureThreshold\":%.1f,"
+           "\"fanOnDuration\":%lu}",
+           desiredHumidity, humidityThreshold,
+           desiredTemperature, temperatureThreshold,
+           fanOnDuration);
+  if (client.connected()) {
+    client.publish("v1/devices/me/attributes", payload, true, 1);
+  }
+}
+
+// Load settings from NVS
+void loadSettings() {
+  preferences.begin("tent-ctrl", false);  // false = read/write mode
+
+  // Load settings with defaults if not found
+  desiredHumidity = preferences.getFloat("desiredHum", DEFAULT_DESIRED_HUMIDITY);
+  humidityThreshold = preferences.getFloat("humidThresh", DEFAULT_HUMIDITY_THRESHOLD);
+  desiredTemperature = preferences.getFloat("desiredTemp", DEFAULT_DESIRED_TEMPERATURE);
+  temperatureThreshold = preferences.getFloat("tempThresh", DEFAULT_TEMPERATURE_THRESHOLD);
+  fanOnDuration = preferences.getULong("fanDuration", DEFAULT_FAN_DURATION);
+
+  preferences.end();
+
+  // Publish current settings
+  publishSettings();
+}
+
+// Save settings to NVS
+void saveSettings() {
+  preferences.begin("tent-ctrl", false);
+
+  preferences.putFloat("desiredHum", desiredHumidity);
+  preferences.putFloat("humidThresh", humidityThreshold);
+  preferences.putFloat("desiredTemp", desiredTemperature);
+  preferences.putFloat("tempThresh", temperatureThreshold);
+  preferences.putULong("fanDuration", fanOnDuration);
+
+  preferences.end();
+
+  // Publish updated settings
+  publishSettings();
 }
 
