@@ -301,6 +301,65 @@ unsigned long getElapsedTime(unsigned long startTime) {
   return (currentTime >= startTime) ? currentTime - startTime : (0xFFFFFFFF - startTime) + currentTime;
 }
 
+// Add at the top with other constants
+const uint8_t SENSOR_READ_RETRIES = 3;
+const unsigned long SENSOR_RETRY_DELAY = 1000;  // 1 second between retries
+
+// Add with other constants
+const unsigned long MQTT_RECONNECT_BASE_DELAY = 1000;  // Start with 1 second
+const unsigned long MQTT_RECONNECT_MAX_DELAY = 60000;  // Max 1 minute
+unsigned long mqttReconnectDelay = MQTT_RECONNECT_BASE_DELAY;
+unsigned long lastMqttReconnectAttempt = 0;
+
+// Add with other constants
+const float MIN_HUMIDITY = 0.0f;
+const float MAX_HUMIDITY = 100.0f;
+const float MIN_TEMPERATURE = 0.0f;
+const float MAX_TEMPERATURE = 40.0f;
+const float MIN_THRESHOLD = 0.1f;
+const float MAX_THRESHOLD = 10.0f;
+const unsigned long MIN_FAN_DURATION = 10000;    // 10 seconds
+const unsigned long MAX_FAN_DURATION = 300000;   // 5 minutes
+
+// Add new validation function
+bool validateSettings(float& humidity, float& humidityThresh,
+                     float& temperature, float& temperatureThresh,
+                     unsigned long& fanDuration) {
+  bool valid = true;
+
+  // Validate and clamp humidity
+  if (humidity < MIN_HUMIDITY || humidity > MAX_HUMIDITY) {
+    humidity = constrain(humidity, MIN_HUMIDITY, MAX_HUMIDITY);
+    valid = false;
+  }
+
+  // Validate and clamp humidity threshold
+  if (humidityThresh < MIN_THRESHOLD || humidityThresh > MAX_THRESHOLD) {
+    humidityThresh = constrain(humidityThresh, MIN_THRESHOLD, MAX_THRESHOLD);
+    valid = false;
+  }
+
+  // Validate and clamp temperature
+  if (temperature < MIN_TEMPERATURE || temperature > MAX_TEMPERATURE) {
+    temperature = constrain(temperature, MIN_TEMPERATURE, MAX_TEMPERATURE);
+    valid = false;
+  }
+
+  // Validate and clamp temperature threshold
+  if (temperatureThresh < MIN_THRESHOLD || temperatureThresh > MAX_THRESHOLD) {
+    temperatureThresh = constrain(temperatureThresh, MIN_THRESHOLD, MAX_THRESHOLD);
+    valid = false;
+  }
+
+  // Validate and clamp fan duration
+  if (fanDuration < MIN_FAN_DURATION || fanDuration > MAX_FAN_DURATION) {
+    fanDuration = constrain(fanDuration, MIN_FAN_DURATION, MAX_FAN_DURATION);
+    valid = false;
+  }
+
+  return valid;
+}
+
 void loop() {
   if (!client.connected()) {
     connect();
@@ -316,27 +375,51 @@ void loop() {
   if (getElapsedTime(previousMillis) >= updateInterval) {
     previousMillis = currentMillis;
 
-    // Read humidity and temperature
-    float humidity;
-    float temperature;
+    // Read humidity and temperature with retries
+    float humidity = 0;
+    float temperature = 0;
+    bool validReading = false;
+
+    for (uint8_t retry = 0; retry < SENSOR_READ_RETRIES && !validReading; retry++) {
+      if (retry > 0) {
+        delay(SENSOR_RETRY_DELAY);
+      }
 
 #ifdef USE_BME
-    humidity = sensor.readHumidity();
-    temperature = sensor.readTemperature();
+      humidity = sensor.readHumidity();
+      temperature = sensor.readTemperature();
 #endif
 
 #ifdef USE_SHT
-    sht45.measureMediumPrecision(temperature, humidity);
+      uint16_t error = sht45.measureMediumPrecision(temperature, humidity);
+      if (error) {
+        Serial.print("Error reading SHT sensor: ");
+        Serial.println(error);
+        continue;
+      }
 #endif
 
-    // Check for valid readings
-    if (isnan(humidity) || isnan(temperature) || humidity == 0 || temperature == 0) {
-      Serial.println("Failed to read from sensor!");
+      if (!isnan(humidity) && !isnan(temperature) && humidity != 0 && temperature != 0) {
+        validReading = true;
+        break;
+      }
+
+      Serial.print("Failed to read from sensor, attempt ");
+      Serial.print(retry + 1);
+      Serial.print(" of ");
+      Serial.println(SENSOR_READ_RETRIES);
+    }
+
+    if (!validReading) {
+      Serial.println("All sensor read attempts failed!");
       humidity = desiredHumidity;
       temperature = desiredTemperature;
       display.clearDisplay();
       display.setCursor(0, 0);
-      display.print("Sensor read failed");
+      display.print("Sensor failed");
+      display.setCursor(0, 16);
+      display.print("Check wiring");
+      display.display();
     } else {
       updateDisplay(temperature, humidity);
     }
@@ -397,9 +480,7 @@ void loop() {
 void messageHandler(String &topic, String &payload) {
   Serial.println("Incoming: " + topic + " - " + payload);
 
-  // Only handle shared attributes updates
   if (topic == "v1/devices/me/attributes") {
-    // Parse JSON payload
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload);
 
@@ -410,83 +491,100 @@ void messageHandler(String &topic, String &payload) {
     }
 
     bool settingsChanged = false;
+    float tempDesiredHumidity = desiredHumidity;
+    float tempHumidityThreshold = humidityThreshold;
+    float tempDesiredTemperature = desiredTemperature;
+    float tempTemperatureThreshold = temperatureThreshold;
+    unsigned long tempFanOnDuration = fanOnDuration;
 
-    // Update settings if present in the payload
     if (doc["desiredHumidity"].is<float>()) {
-      desiredHumidity = doc["desiredHumidity"].as<float>();
+      tempDesiredHumidity = doc["desiredHumidity"].as<float>();
       settingsChanged = true;
     }
     if (doc["humidityThreshold"].is<float>()) {
-      humidityThreshold = doc["humidityThreshold"].as<float>();
+      tempHumidityThreshold = doc["humidityThreshold"].as<float>();
       settingsChanged = true;
     }
     if (doc["desiredTemperature"].is<float>()) {
-      desiredTemperature = doc["desiredTemperature"].as<float>();
+      tempDesiredTemperature = doc["desiredTemperature"].as<float>();
       settingsChanged = true;
     }
     if (doc["temperatureThreshold"].is<float>()) {
-      temperatureThreshold = doc["temperatureThreshold"].as<float>();
+      tempTemperatureThreshold = doc["temperatureThreshold"].as<float>();
       settingsChanged = true;
     }
     if (doc["fanOnDuration"].is<unsigned long>()) {
-      fanOnDuration = doc["fanOnDuration"].as<unsigned long>();
+      tempFanOnDuration = doc["fanOnDuration"].as<unsigned long>();
       settingsChanged = true;
     }
 
-    // If any setting was changed, save to NVS
     if (settingsChanged) {
+      // Validate and potentially adjust new settings
+      if (!validateSettings(tempDesiredHumidity, tempHumidityThreshold,
+                          tempDesiredTemperature, tempTemperatureThreshold,
+                          tempFanOnDuration)) {
+        Serial.println("Warning: Some settings were out of range and have been adjusted");
+      }
+
+      // Apply validated settings
+      desiredHumidity = tempDesiredHumidity;
+      humidityThreshold = tempHumidityThreshold;
+      desiredTemperature = tempDesiredTemperature;
+      temperatureThreshold = tempTemperatureThreshold;
+      fanOnDuration = tempFanOnDuration;
+
       saveSettings();
     }
   }
 }
 
 void connect() {
-  uint8_t retryCount = 0;
+  // Only attempt reconnection after delay has passed
+  if (millis() - lastMqttReconnectAttempt < mqttReconnectDelay) {
+    return;
+  }
+
+  lastMqttReconnectAttempt = millis();
 
   // Start or reconnect to Wi-Fi
   if (WiFi.status() != WL_CONNECTED) {
     Serial.print("\nConnecting to Wi-Fi");
-    WiFi.begin(ssid, pass);  // Start the Wi-Fi connection
+    WiFi.begin(ssid, pass);
 
-    // Wait for connection
-    while (WiFi.status() != WL_CONNECTED && retryCount < MAX_RETRIES) {  // Retry up to 10 times (5 seconds)
+    uint8_t retryCount = 0;
+    while (WiFi.status() != WL_CONNECTED && retryCount < MAX_RETRIES) {
       Serial.print(".");
-      delay(500);  // Wait 500 ms before retrying
+      delay(500);
       retryCount++;
       yield();
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-      Serial.println("\nConnected to Wi-Fi");
-    } else {
+    if (WiFi.status() != WL_CONNECTED) {
       Serial.println("\nFailed to connect to Wi-Fi");
+      mqttReconnectDelay = min(mqttReconnectDelay * 2, MQTT_RECONNECT_MAX_DELAY);
       return;
     }
+
+    Serial.println("\nConnected to Wi-Fi");
+    // Reset delay on successful WiFi connection
+    mqttReconnectDelay = MQTT_RECONNECT_BASE_DELAY;
   }
 
   Serial.print("\nConnecting to MQTT broker");
   client.begin(broker, port, net);
-
-  // Set up message handler
   client.onMessage(messageHandler);
 
-  retryCount = 0;
-  while (!client.connected() && retryCount < MAX_RETRIES) {
-    client.connect("ESP32Client", token, (const char *)nullptr);
-    Serial.print(".");
-    delay(500);
-    retryCount++;
-    yield();
-  }
-
-  if (client.connected()) {
+  if (client.connect("ESP32Client", token, (const char *)nullptr)) {
     Serial.println("\nConnected to MQTT broker");
-    // Subscribe to shared attributes topic
     client.subscribe("v1/devices/me/attributes");
-    // Publish current settings after connection
     publishSettings();
+    // Reset delay on successful connection
+    mqttReconnectDelay = MQTT_RECONNECT_BASE_DELAY;
   } else {
-    Serial.println("\nFailed to connect to MQTT broker, retrying later...");
+    Serial.print("\nFailed to connect to MQTT broker (error: ");
+    Serial.print(client.lastError());
+    Serial.println("), retrying later...");
+    mqttReconnectDelay = min(mqttReconnectDelay * 2, MQTT_RECONNECT_MAX_DELAY);
   }
 }
 
@@ -513,16 +611,29 @@ void publishSettings() {
 
 // Load settings from NVS
 void loadSettings() {
-  preferences.begin("tent-ctrl", false);  // false = read/write mode
+  preferences.begin("tent-ctrl", false);
 
-  // Load settings with defaults if not found
-  desiredHumidity = preferences.getFloat("desiredHum", DEFAULT_DESIRED_HUMIDITY);
-  humidityThreshold = preferences.getFloat("humidThresh", DEFAULT_HUMIDITY_THRESHOLD);
-  desiredTemperature = preferences.getFloat("desiredTemp", DEFAULT_DESIRED_TEMPERATURE);
-  temperatureThreshold = preferences.getFloat("tempThresh", DEFAULT_TEMPERATURE_THRESHOLD);
-  fanOnDuration = preferences.getULong("fanDuration", DEFAULT_FAN_DURATION);
+  float tempDesiredHumidity = preferences.getFloat("desiredHum", DEFAULT_DESIRED_HUMIDITY);
+  float tempHumidityThreshold = preferences.getFloat("humidThresh", DEFAULT_HUMIDITY_THRESHOLD);
+  float tempDesiredTemperature = preferences.getFloat("desiredTemp", DEFAULT_DESIRED_TEMPERATURE);
+  float tempTemperatureThreshold = preferences.getFloat("tempThresh", DEFAULT_TEMPERATURE_THRESHOLD);
+  unsigned long tempFanOnDuration = preferences.getULong("fanDuration", DEFAULT_FAN_DURATION);
 
   preferences.end();
+
+  // Validate and potentially adjust settings
+  if (!validateSettings(tempDesiredHumidity, tempHumidityThreshold,
+                       tempDesiredTemperature, tempTemperatureThreshold,
+                       tempFanOnDuration)) {
+    Serial.println("Warning: Some settings were out of range and have been adjusted");
+  }
+
+  // Apply validated settings
+  desiredHumidity = tempDesiredHumidity;
+  humidityThreshold = tempHumidityThreshold;
+  desiredTemperature = tempDesiredTemperature;
+  temperatureThreshold = tempTemperatureThreshold;
+  fanOnDuration = tempFanOnDuration;
 
   // Publish current settings
   publishSettings();
