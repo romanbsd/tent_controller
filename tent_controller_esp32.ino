@@ -480,61 +480,63 @@ void loop() {
 void messageHandler(String &topic, String &payload) {
   Serial.println("Incoming: " + topic + " - " + payload);
 
-  if (topic == "v1/devices/me/attributes") {
-    JsonDocument doc;
-    DeserializationError error = deserializeJson(doc, payload);
+  if (topic != "v1/devices/me/attributes") {
+    return;
+  }
 
-    if (error) {
-      Serial.print("deserializeJson() failed: ");
-      Serial.println(error.c_str());
-      return;
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, payload);
+
+  if (error) {
+    Serial.print("deserializeJson() failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  bool settingsChanged = false;
+  float tempDesiredHumidity = desiredHumidity;
+  float tempHumidityThreshold = humidityThreshold;
+  float tempDesiredTemperature = desiredTemperature;
+  float tempTemperatureThreshold = temperatureThreshold;
+  unsigned long tempFanOnDuration = fanOnDuration;
+
+  if (doc["desiredHumidity"].is<float>()) {
+    tempDesiredHumidity = doc["desiredHumidity"].as<float>();
+    settingsChanged = true;
+  }
+  if (doc["humidityThreshold"].is<float>()) {
+    tempHumidityThreshold = doc["humidityThreshold"].as<float>();
+    settingsChanged = true;
+  }
+  if (doc["desiredTemperature"].is<float>()) {
+    tempDesiredTemperature = doc["desiredTemperature"].as<float>();
+    settingsChanged = true;
+  }
+  if (doc["temperatureThreshold"].is<float>()) {
+    tempTemperatureThreshold = doc["temperatureThreshold"].as<float>();
+    settingsChanged = true;
+  }
+  if (doc["fanOnDuration"].is<unsigned long>()) {
+    tempFanOnDuration = doc["fanOnDuration"].as<unsigned long>();
+    settingsChanged = true;
+  }
+
+  if (settingsChanged) {
+    // Validate and potentially adjust new settings
+    if (!validateSettings(tempDesiredHumidity, tempHumidityThreshold,
+                        tempDesiredTemperature, tempTemperatureThreshold,
+                        tempFanOnDuration)) {
+      Serial.println("Warning: Some settings were out of range and have been adjusted");
     }
 
-    bool settingsChanged = false;
-    float tempDesiredHumidity = desiredHumidity;
-    float tempHumidityThreshold = humidityThreshold;
-    float tempDesiredTemperature = desiredTemperature;
-    float tempTemperatureThreshold = temperatureThreshold;
-    unsigned long tempFanOnDuration = fanOnDuration;
+    // Apply validated settings
+    desiredHumidity = tempDesiredHumidity;
+    humidityThreshold = tempHumidityThreshold;
+    desiredTemperature = tempDesiredTemperature;
+    temperatureThreshold = tempTemperatureThreshold;
+    fanOnDuration = tempFanOnDuration;
 
-    if (doc["desiredHumidity"].is<float>()) {
-      tempDesiredHumidity = doc["desiredHumidity"].as<float>();
-      settingsChanged = true;
-    }
-    if (doc["humidityThreshold"].is<float>()) {
-      tempHumidityThreshold = doc["humidityThreshold"].as<float>();
-      settingsChanged = true;
-    }
-    if (doc["desiredTemperature"].is<float>()) {
-      tempDesiredTemperature = doc["desiredTemperature"].as<float>();
-      settingsChanged = true;
-    }
-    if (doc["temperatureThreshold"].is<float>()) {
-      tempTemperatureThreshold = doc["temperatureThreshold"].as<float>();
-      settingsChanged = true;
-    }
-    if (doc["fanOnDuration"].is<unsigned long>()) {
-      tempFanOnDuration = doc["fanOnDuration"].as<unsigned long>();
-      settingsChanged = true;
-    }
-
-    if (settingsChanged) {
-      // Validate and potentially adjust new settings
-      if (!validateSettings(tempDesiredHumidity, tempHumidityThreshold,
-                          tempDesiredTemperature, tempTemperatureThreshold,
-                          tempFanOnDuration)) {
-        Serial.println("Warning: Some settings were out of range and have been adjusted");
-      }
-
-      // Apply validated settings
-      desiredHumidity = tempDesiredHumidity;
-      humidityThreshold = tempHumidityThreshold;
-      desiredTemperature = tempDesiredTemperature;
-      temperatureThreshold = tempTemperatureThreshold;
-      fanOnDuration = tempFanOnDuration;
-
-      saveSettings();
-    }
+    saveSettings();
   }
 }
 
