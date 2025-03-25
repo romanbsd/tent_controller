@@ -62,7 +62,6 @@ MQTTClient client;
 unsigned long previousMillis = 0;
 unsigned long previousFanMillis = 0;        // Tracks last time the fan was turned on
 unsigned long fanStartMillis = 0;           // Tracks the time when fan is turned on
-const unsigned long fanInterval = 3600000;  // 1 hour in milliseconds
 const unsigned long updateInterval = 2000;  // 2-second interval for main loop logic
 
 // Create preferences object
@@ -73,7 +72,8 @@ const float DEFAULT_DESIRED_HUMIDITY = 90.0f;
 const float DEFAULT_HUMIDITY_THRESHOLD = 4.0f;
 const float DEFAULT_DESIRED_TEMPERATURE = 23.0f;
 const float DEFAULT_TEMPERATURE_THRESHOLD = 2.0f;
-const unsigned long DEFAULT_FAN_DURATION = 60000;  // 1 minute in milliseconds
+const unsigned long DEFAULT_FAN_DURATION = 30000;  // 30 seconds in milliseconds
+const unsigned long DEFAULT_FAN_INTERVAL = 900000; // 15 minutes in milliseconds
 
 // Settings variables
 float desiredHumidity;     // Desired humidity percentage
@@ -81,6 +81,7 @@ float humidityThreshold;   // Tolerance range for humidity
 float desiredTemperature;  // Target temperature
 float temperatureThreshold;
 unsigned long fanOnDuration;
+unsigned long fanInterval;  // Add new setting variable
 
 bool isFanOn = false;
 bool isPumpOn = false;
@@ -331,7 +332,7 @@ void adjustHumidity(float adjustment) {
 
   if (validateSettings(newHumidity, humidityThreshold,
                       desiredTemperature, temperatureThreshold,
-                      fanOnDuration)) {
+                      fanOnDuration, fanInterval)) {
     desiredHumidity = newHumidity;
     saveSettings();
     Serial.print("Desired humidity ");
@@ -369,7 +370,7 @@ const unsigned long MAX_FAN_DURATION = 300000;   // 5 minutes
 // Add new validation function
 bool validateSettings(float& humidity, float& humidityThresh,
                      float& temperature, float& temperatureThresh,
-                     unsigned long& fanDuration) {
+                     unsigned long& fanDuration, unsigned long& fanIntervalValue) {
   bool valid = true;
 
   // Validate and clamp humidity
@@ -399,6 +400,14 @@ bool validateSettings(float& humidity, float& humidityThresh,
   // Validate and clamp fan duration
   if (fanDuration < MIN_FAN_DURATION || fanDuration > MAX_FAN_DURATION) {
     fanDuration = constrain(fanDuration, MIN_FAN_DURATION, MAX_FAN_DURATION);
+    valid = false;
+  }
+
+  // Validate and clamp fan interval (minimum 1 minute, maximum 1 hour)
+  const unsigned long MIN_FAN_INTERVAL = 60000;    // 1 minute
+  const unsigned long MAX_FAN_INTERVAL = 3600000;  // 1 hour
+  if (fanIntervalValue < MIN_FAN_INTERVAL || fanIntervalValue > MAX_FAN_INTERVAL) {
+    fanIntervalValue = constrain(fanIntervalValue, MIN_FAN_INTERVAL, MAX_FAN_INTERVAL);
     valid = false;
   }
 
@@ -544,6 +553,7 @@ void messageHandler(String &topic, String &payload) {
   float tempDesiredTemperature = desiredTemperature;
   float tempTemperatureThreshold = temperatureThreshold;
   unsigned long tempFanOnDuration = fanOnDuration;
+  unsigned long tempFanInterval = fanInterval;  // Add new setting
 
   if (doc["desiredHumidity"].is<float>()) {
     tempDesiredHumidity = doc["desiredHumidity"].as<float>();
@@ -565,12 +575,16 @@ void messageHandler(String &topic, String &payload) {
     tempFanOnDuration = doc["fanOnDuration"].as<unsigned long>();
     settingsChanged = true;
   }
+  if (doc["fanInterval"].is<unsigned long>()) {
+    tempFanInterval = doc["fanInterval"].as<unsigned long>();
+    settingsChanged = true;
+  }
 
   if (settingsChanged) {
     // Validate and potentially adjust new settings
     if (!validateSettings(tempDesiredHumidity, tempHumidityThreshold,
                         tempDesiredTemperature, tempTemperatureThreshold,
-                        tempFanOnDuration)) {
+                        tempFanOnDuration, tempFanInterval)) {
       Serial.println("Warning: Some settings were out of range and have been adjusted");
     }
 
@@ -580,6 +594,7 @@ void messageHandler(String &topic, String &payload) {
     desiredTemperature = tempDesiredTemperature;
     temperatureThreshold = tempTemperatureThreshold;
     fanOnDuration = tempFanOnDuration;
+    fanInterval = tempFanInterval;  // Apply new setting
 
     saveSettings();
   }
@@ -643,14 +658,14 @@ void sendData(float temperature, float humidity, int ppm) {
 
 // Helper method to publish settings as attributes
 void publishSettings() {
-  char payload[128];
+  char payload[160];  // Increased buffer size to accommodate new setting
   snprintf(payload, sizeof(payload),
            "{\"desiredHumidity\":%.1f,\"humidityThreshold\":%.1f,"
            "\"desiredTemperature\":%.1f,\"temperatureThreshold\":%.1f,"
-           "\"fanOnDuration\":%lu}",
+           "\"fanOnDuration\":%lu,\"fanInterval\":%lu}",  // Add fanInterval
            desiredHumidity, humidityThreshold,
            desiredTemperature, temperatureThreshold,
-           fanOnDuration);
+           fanOnDuration, fanInterval);
   if (client.connected()) {
     client.publish("v1/devices/me/attributes", payload, true, 1);
   }
@@ -665,13 +680,14 @@ void loadSettings() {
   float tempDesiredTemperature = preferences.getFloat("desiredTemp", DEFAULT_DESIRED_TEMPERATURE);
   float tempTemperatureThreshold = preferences.getFloat("tempThresh", DEFAULT_TEMPERATURE_THRESHOLD);
   unsigned long tempFanOnDuration = preferences.getULong("fanDuration", DEFAULT_FAN_DURATION);
+  unsigned long tempFanInterval = preferences.getULong("fanInterval", DEFAULT_FAN_INTERVAL);  // Add new setting
 
   preferences.end();
 
   // Validate and potentially adjust settings
   if (!validateSettings(tempDesiredHumidity, tempHumidityThreshold,
                        tempDesiredTemperature, tempTemperatureThreshold,
-                       tempFanOnDuration)) {
+                       tempFanOnDuration, tempFanInterval)) {  // Add fanInterval to validation
     Serial.println("Warning: Some settings were out of range and have been adjusted");
   }
 
@@ -681,6 +697,7 @@ void loadSettings() {
   desiredTemperature = tempDesiredTemperature;
   temperatureThreshold = tempTemperatureThreshold;
   fanOnDuration = tempFanOnDuration;
+  fanInterval = tempFanInterval;  // Apply new setting
 
   // Publish current settings
   publishSettings();
@@ -695,6 +712,7 @@ void saveSettings() {
   preferences.putFloat("desiredTemp", desiredTemperature);
   preferences.putFloat("tempThresh", temperatureThreshold);
   preferences.putULong("fanDuration", fanOnDuration);
+  preferences.putULong("fanInterval", fanInterval);  // Add new setting
 
   preferences.end();
 
