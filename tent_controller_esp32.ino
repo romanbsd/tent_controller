@@ -43,13 +43,15 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define FAN_RELAY_PIN 25
 #define HUMIDIFIER_RELAY_PIN 26
 
-#define BUTTON_PIN A3
+#define HUMIDITY_UP_PIN 32    // GPIO32 - unused pin
+#define HUMIDITY_DOWN_PIN 33  // GPIO33 - unused pin
+const float HUMIDITY_STEP = 1.0; // Change humidity by 1% increments
 #define DEBOUNCE_DELAY 50
 
 const uint8_t MAX_RETRIES = 10;
 const char ssid[] = "eternity";
 const char pass[] = "OpenSesame3";
-const char token[] = "t0x1394lpdoaye1h6ac1";
+const char token[] = "x6BJrHUyCEwZwKb0oeax";
 const char broker[] = "dash.gugl.org";
 const int port = 1883;
 
@@ -148,7 +150,7 @@ void drawStatusIcons() {
 }
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Serial started");
 
   // Load settings from NVS
@@ -184,7 +186,8 @@ void setup() {
   pinMode(HEATER_RELAY_PIN, OUTPUT);
   pinMode(HUMIDIFIER_RELAY_PIN, OUTPUT);
 
-  pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(HUMIDITY_DOWN_PIN, INPUT_PULLUP);
+  pinMode(HUMIDITY_UP_PIN, INPUT_PULLUP);
 
   // Turn off the relays initially
   digitalWrite(FAN_RELAY_PIN, LOW);
@@ -274,25 +277,61 @@ void updateDisplay(float temperature, float humidity) {
 }
 
 void handleButton() {
-  static uint8_t lastSteadyState = HIGH, lastFlickerableState = HIGH;
-  static unsigned long lastDebounceTime = 0;
+  static uint8_t lastUpState = HIGH, lastDownState = HIGH;
+  static unsigned long lastUpDebounce = 0, lastDownDebounce = 0;
+  unsigned long currentMillis = millis();
 
-  int currentState = digitalRead(BUTTON_PIN);
+  // Read current button states
+  int currentUpState = digitalRead(HUMIDITY_UP_PIN);
+  int currentDownState = digitalRead(HUMIDITY_DOWN_PIN);
 
-  // Debounce logic: Update flickerable state and debounce timer
-  if (currentState != lastFlickerableState) {
-    lastDebounceTime = millis();
-    lastFlickerableState = currentState;
+  // Handle UP button
+  if (currentUpState != lastUpState) {
+    lastUpDebounce = currentMillis;
   }
 
-  // Check for a stable button state
-  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY) {
-    if (lastSteadyState == HIGH && currentState == LOW) {
-      Serial.println("Button pressed");
-      toggleFan(!isFanOn);
-      fanStartMillis = millis();
+  if ((currentMillis - lastUpDebounce) > DEBOUNCE_DELAY) {
+    if (currentUpState == LOW) {  // Button is pressed (remember it's active LOW)
+      adjustHumidity(HUMIDITY_STEP);
+      // Wait for button release to prevent multiple triggers
+      while (digitalRead(HUMIDITY_UP_PIN) == LOW) {
+        delay(10);
+      }
     }
-    lastSteadyState = currentState;  // Update steady state
+  }
+
+  // Handle DOWN button
+  if (currentDownState != lastDownState) {
+    lastDownDebounce = currentMillis;
+  }
+
+  if ((currentMillis - lastDownDebounce) > DEBOUNCE_DELAY) {
+    if (currentDownState == LOW) {  // Button is pressed
+      adjustHumidity(-HUMIDITY_STEP);
+      // Wait for button release to prevent multiple triggers
+      while (digitalRead(HUMIDITY_DOWN_PIN) == LOW) {
+        delay(10);
+      }
+    }
+  }
+
+  lastUpState = currentUpState;
+  lastDownState = currentDownState;
+}
+
+void adjustHumidity(float adjustment) {
+  Serial.println(adjustment > 0 ? "Up button pressed" : "Down button pressed");
+  float newHumidity = desiredHumidity + adjustment;
+
+  if (validateSettings(newHumidity, humidityThreshold,
+                      desiredTemperature, temperatureThreshold,
+                      fanOnDuration)) {
+    desiredHumidity = newHumidity;
+    saveSettings();
+    Serial.print("Desired humidity ");
+    Serial.print(adjustment > 0 ? "increased" : "decreased");
+    Serial.print(" to: ");
+    Serial.println(desiredHumidity);
   }
 }
 
