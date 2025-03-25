@@ -423,6 +423,11 @@ void loop() {
 
   unsigned long currentMillis = millis();
 
+  // Update cached relay states
+  isFanOn = (digitalRead(FAN_RELAY_PIN) == LOW);
+  isPumpOn = (digitalRead(HUMIDIFIER_RELAY_PIN) == LOW);
+  isHeaterOn = (digitalRead(HEATER_RELAY_PIN) == LOW);
+
   handleButton();
 
   // Main loop tasks every 2 seconds
