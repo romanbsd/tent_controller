@@ -190,9 +190,9 @@ void setup() {
   pinMode(HUMIDITY_UP_PIN, INPUT_PULLUP);
 
   // Turn off the relays initially
-  digitalWrite(FAN_RELAY_PIN, LOW);
-  digitalWrite(HEATER_RELAY_PIN, LOW);
-  digitalWrite(HUMIDIFIER_RELAY_PIN, LOW);
+  digitalWrite(FAN_RELAY_PIN, HIGH);
+  digitalWrite(HEATER_RELAY_PIN, HIGH);
+  digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH);
 
   // Configure the Task Watchdog Timer (TWDT)
   esp_task_wdt_config_t wdtConfig = {
@@ -226,7 +226,7 @@ void publishDeviceState(const char* device, bool state) {
 }
 
 void toggleFan(bool on) {
-  digitalWrite(FAN_RELAY_PIN, on ? HIGH : LOW);  // Turn on fan
+  digitalWrite(FAN_RELAY_PIN, on ? LOW : HIGH);
   isFanOn = on;
   Serial.print("Fan ");
   Serial.println(on ? "ON" : "OFF");
@@ -234,7 +234,7 @@ void toggleFan(bool on) {
 }
 
 void togglePump(bool on) {
-  digitalWrite(HUMIDIFIER_RELAY_PIN, on ? HIGH : LOW);  // Turn on humidifier
+  digitalWrite(HUMIDIFIER_RELAY_PIN, on ? LOW : HIGH);
   isPumpOn = on;
   Serial.print("Humidifier ");
   Serial.println(on ? "ON" : "OFF");
@@ -242,7 +242,7 @@ void togglePump(bool on) {
 }
 
 void toggleHeater(bool on) {
-  digitalWrite(HEATER_RELAY_PIN, on ? HIGH : LOW);  // Turn on heater
+  digitalWrite(HEATER_RELAY_PIN, on ? LOW : HIGH);
   isHeaterOn = on;
   Serial.print("Heater ");
   Serial.println(on ? "ON" : "OFF");
