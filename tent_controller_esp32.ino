@@ -193,7 +193,7 @@ void setup() {
   // Turn off the relays initially
   digitalWrite(FAN_RELAY_PIN, HIGH);
   digitalWrite(HEATER_RELAY_PIN, HIGH);
-  digitalWrite(HUMIDIFIER_RELAY_PIN, LOW);
+  digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH);
 
   // Configure the Task Watchdog Timer (TWDT)
   esp_task_wdt_config_t wdtConfig = {
@@ -235,7 +235,7 @@ void toggleFan(bool on) {
 }
 
 void togglePump(bool on) {
-  digitalWrite(HUMIDIFIER_RELAY_PIN, on ? HIGH : LOW);
+  digitalWrite(HUMIDIFIER_RELAY_PIN, on ? LOW : HIGH);
   isPumpOn = on;
   Serial.print("Humidifier ");
   Serial.println(on ? "ON" : "OFF");
@@ -425,7 +425,7 @@ void loop() {
 
   // Update cached relay states
   isFanOn = (digitalRead(FAN_RELAY_PIN) == LOW);
-  isPumpOn = (digitalRead(HUMIDIFIER_RELAY_PIN) == HIGH);
+  isPumpOn = (digitalRead(HUMIDIFIER_RELAY_PIN) == LOW);
   isHeaterOn = (digitalRead(HEATER_RELAY_PIN) == LOW);
 
   handleButton();
