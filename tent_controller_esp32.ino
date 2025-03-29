@@ -198,7 +198,7 @@ void setup() {
   // Configure the Task Watchdog Timer (TWDT)
   esp_task_wdt_config_t wdtConfig = {
     .timeout_ms = 5000,            // Set the timeout to 5000 ms (5 seconds)
-    .idle_core_mask = 0b01,        // Monitor idle task of core 0 only (ESP32 has two cores: core 0 and core 1)
+    .idle_core_mask = (1ULL << portNUM_PROCESSORS) - 1,  // Monitor all cores
     .trigger_panic = false         // Do not trigger a panic; reset the system instead
   };
 
@@ -303,6 +303,7 @@ void handleButton() {
       // Wait for button release to prevent multiple triggers
       while (digitalRead(HUMIDITY_UP_PIN) == LOW) {
         delay(10);
+        yield();
       }
     }
   }
@@ -318,6 +319,7 @@ void handleButton() {
       // Wait for button release to prevent multiple triggers
       while (digitalRead(HUMIDITY_DOWN_PIN) == LOW) {
         delay(10);
+        yield();
       }
     }
   }
@@ -415,6 +417,8 @@ bool validateSettings(float& humidity, float& humidityThresh,
 }
 
 void loop() {
+  esp_task_wdt_reset();
+
   if (!client.connected()) {
     connect();
   }
@@ -442,6 +446,7 @@ void loop() {
     for (uint8_t retry = 0; retry < SENSOR_READ_RETRIES && !validReading; retry++) {
       if (retry > 0) {
         delay(SENSOR_RETRY_DELAY);
+        yield();
       }
 
 #ifdef USE_BME
