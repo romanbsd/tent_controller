@@ -48,10 +48,14 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 const float HUMIDITY_STEP = 1.0; // Change humidity by 1% increments
 #define DEBOUNCE_DELAY 50
 
+#define T_ON HIGH
+#define T_OFF LOW
+
 const uint8_t MAX_RETRIES = 10;
 const char ssid[] = "eternity";
 const char pass[] = "OpenSesame3";
 const char token[] = "x6BJrHUyCEwZwKb0oeax";
+// const char token[] = "t0x1394lpdoaye1h6ac1"; // esp32 monitor
 const char broker[] = "dash.gugl.org";
 const int port = 1883;
 
@@ -74,6 +78,22 @@ const float DEFAULT_DESIRED_TEMPERATURE = 23.0f;
 const float DEFAULT_TEMPERATURE_THRESHOLD = 2.0f;
 const unsigned long DEFAULT_FAN_DURATION = 30000;  // 30 seconds in milliseconds
 const unsigned long DEFAULT_FAN_INTERVAL = 900000; // 15 minutes in milliseconds
+// Constraints
+const float MIN_HUMIDITY = 0.0f;
+const float MAX_HUMIDITY = 100.0f;
+const float MIN_TEMPERATURE = 0.0f;
+const float MAX_TEMPERATURE = 30.0f;
+const float MIN_THRESHOLD = 0.1f;
+const float MAX_THRESHOLD = 10.0f;
+const unsigned long MIN_FAN_DURATION = 10000;    // 10 seconds
+const unsigned long MAX_FAN_DURATION = 300000;   // 5 minutes
+
+const uint8_t SENSOR_READ_RETRIES = 3;
+const unsigned long SENSOR_RETRY_DELAY = 1000;  // 1 second between retries
+const unsigned long MQTT_RECONNECT_BASE_DELAY = 1000;  // Start with 1 second
+const unsigned long MQTT_RECONNECT_MAX_DELAY = 60000;  // Max 1 minute
+unsigned long mqttReconnectDelay = MQTT_RECONNECT_BASE_DELAY;
+unsigned long lastMqttReconnectAttempt = 0;
 
 // Settings variables
 float desiredHumidity;     // Desired humidity percentage
@@ -140,13 +160,13 @@ void initDisplay() {
 // Function to draw status icons
 void drawStatusIcons() {
   if (isFanOn) {
-    display.drawBitmap(0, 48, fanIcon, 16, 16, SSD1306_WHITE);
+    display.drawBitmap(0, 0, fanIcon, 16, 16, SSD1306_WHITE);
   }
   if (isHeaterOn) {
-    display.drawBitmap(56, 48, heatIcon, 16, 16, SSD1306_WHITE);
+    display.drawBitmap(56, 0, heatIcon, 16, 16, SSD1306_WHITE);
   }
   if (isPumpOn) {
-    display.drawBitmap(112, 48, waterIcon, 16, 16, SSD1306_WHITE);
+    display.drawBitmap(112, 0, waterIcon, 16, 16, SSD1306_WHITE);
   }
 }
 
@@ -191,9 +211,9 @@ void setup() {
   pinMode(HUMIDITY_UP_PIN, INPUT_PULLUP);
 
   // Turn off the relays initially
-  digitalWrite(FAN_RELAY_PIN, HIGH);
-  digitalWrite(HEATER_RELAY_PIN, HIGH);
-  digitalWrite(HUMIDIFIER_RELAY_PIN, HIGH);
+  digitalWrite(FAN_RELAY_PIN, T_OFF);
+  digitalWrite(HEATER_RELAY_PIN, T_OFF);
+  digitalWrite(HUMIDIFIER_RELAY_PIN, T_OFF);
 
   // Configure the Task Watchdog Timer (TWDT)
   esp_task_wdt_config_t wdtConfig = {
@@ -227,7 +247,7 @@ void publishDeviceState(const char* device, bool state) {
 }
 
 void toggleFan(bool on) {
-  digitalWrite(FAN_RELAY_PIN, on ? LOW : HIGH);
+  digitalWrite(FAN_RELAY_PIN, on ? T_ON : T_OFF);
   isFanOn = on;
   Serial.print("Fan ");
   Serial.println(on ? "ON" : "OFF");
@@ -235,7 +255,7 @@ void toggleFan(bool on) {
 }
 
 void togglePump(bool on) {
-  digitalWrite(HUMIDIFIER_RELAY_PIN, on ? LOW : HIGH);
+  digitalWrite(HUMIDIFIER_RELAY_PIN, on ? T_ON : T_OFF);
   isPumpOn = on;
   Serial.print("Humidifier ");
   Serial.println(on ? "ON" : "OFF");
@@ -243,7 +263,7 @@ void togglePump(bool on) {
 }
 
 void toggleHeater(bool on) {
-  digitalWrite(HEATER_RELAY_PIN, on ? LOW : HIGH);
+  digitalWrite(HEATER_RELAY_PIN, on ? T_ON : T_OFF);
   isHeaterOn = on;
   Serial.print("Heater ");
   Serial.println(on ? "ON" : "OFF");
@@ -255,7 +275,7 @@ void updateDisplay(float temperature, float humidity) {
 
   // Display temperature with desired value
   display.setTextSize(1);  // Smaller font size
-  display.setCursor(0, 0);
+  display.setCursor(24, 24);
   display.print(temperature, 1);
   display.print("C");
   display.print(" (");
@@ -263,7 +283,7 @@ void updateDisplay(float temperature, float humidity) {
   display.print("C)");
 
   // Display humidity with desired value
-  display.setCursor(0, 12);  // Adjusted Y position for smaller font
+  display.setCursor(24, 36);
   display.print(humidity, 1);
   display.print("%");
   display.print(" (");
@@ -349,26 +369,6 @@ unsigned long getElapsedTime(unsigned long startTime) {
   return (currentTime >= startTime) ? currentTime - startTime : (0xFFFFFFFF - startTime) + currentTime;
 }
 
-// Add at the top with other constants
-const uint8_t SENSOR_READ_RETRIES = 3;
-const unsigned long SENSOR_RETRY_DELAY = 1000;  // 1 second between retries
-
-// Add with other constants
-const unsigned long MQTT_RECONNECT_BASE_DELAY = 1000;  // Start with 1 second
-const unsigned long MQTT_RECONNECT_MAX_DELAY = 60000;  // Max 1 minute
-unsigned long mqttReconnectDelay = MQTT_RECONNECT_BASE_DELAY;
-unsigned long lastMqttReconnectAttempt = 0;
-
-// Add with other constants
-const float MIN_HUMIDITY = 0.0f;
-const float MAX_HUMIDITY = 100.0f;
-const float MIN_TEMPERATURE = 0.0f;
-const float MAX_TEMPERATURE = 40.0f;
-const float MIN_THRESHOLD = 0.1f;
-const float MAX_THRESHOLD = 10.0f;
-const unsigned long MIN_FAN_DURATION = 10000;    // 10 seconds
-const unsigned long MAX_FAN_DURATION = 300000;   // 5 minutes
-
 // Add new validation function
 bool validateSettings(float& humidity, float& humidityThresh,
                      float& temperature, float& temperatureThresh,
@@ -417,8 +417,6 @@ bool validateSettings(float& humidity, float& humidityThresh,
 }
 
 void loop() {
-  esp_task_wdt_reset();
-
   if (!client.connected()) {
     connect();
   }
@@ -428,9 +426,9 @@ void loop() {
   unsigned long currentMillis = millis();
 
   // Update cached relay states
-  isFanOn = (digitalRead(FAN_RELAY_PIN) == LOW);
-  isPumpOn = (digitalRead(HUMIDIFIER_RELAY_PIN) == LOW);
-  isHeaterOn = (digitalRead(HEATER_RELAY_PIN) == LOW);
+  isFanOn = (digitalRead(FAN_RELAY_PIN) == T_ON);
+  isPumpOn = (digitalRead(HUMIDIFIER_RELAY_PIN) == T_ON);
+  isHeaterOn = (digitalRead(HEATER_RELAY_PIN) == T_ON);
 
   handleButton();
 
@@ -479,9 +477,9 @@ void loop() {
       humidity = desiredHumidity;
       temperature = desiredTemperature;
       display.clearDisplay();
-      display.setCursor(0, 0);
+      display.setCursor(24, 24);
       display.print("Sensor failed");
-      display.setCursor(0, 16);
+      display.setCursor(24, 40);
       display.print("Check wiring");
       display.display();
     } else {
@@ -491,7 +489,7 @@ void loop() {
     // Humidifier control based on desired humidity level
     if (!isPumpOn && humidity <= (desiredHumidity - humidityThreshold)) {
       togglePump(true);
-    } else if (isPumpOn && humidity >= desiredHumidity) {
+    } else if (isPumpOn && humidity >= desiredHumidity + 1) {
       togglePump(false);
     }
     // Heater control based on desired temperature
